@@ -51,7 +51,8 @@ class EngineAPI(object):
 
     def schedule_and_create_servers(self, context, servers, requested_networks,
                                     user_data, injected_files, key_pair,
-                                    request_spec, filter_properties):
+                                    partitions, request_spec,
+                                    filter_properties):
         """Signal to engine service to perform a deployment."""
         cctxt = self.client.prepare(topic=self.topic, server=CONF.host)
         cctxt.cast(context, 'schedule_and_create_servers', servers=servers,
@@ -59,6 +60,7 @@ class EngineAPI(object):
                    user_data=user_data,
                    injected_files=injected_files,
                    key_pair=key_pair,
+                   partitions=partitions,
                    request_spec=request_spec,
                    filter_properties=filter_properties)
 
@@ -73,10 +75,11 @@ class EngineAPI(object):
         return cctxt.cast(context, 'set_power_state',
                           server=server, state=state)
 
-    def rebuild_server(self, context, server):
+    def rebuild_server(self, context, server, preserve_ephemeral):
         """Signal to engine service to rebuild a server."""
         cctxt = self.client.prepare(topic=self.topic, server=CONF.host)
-        return cctxt.cast(context, 'rebuild_server', server=server)
+        return cctxt.cast(context, 'rebuild_server', server=server,
+                          preserve_ephemeral=preserve_ephemeral)
 
     def get_serial_console(self, context, server, console_type):
         cctxt = self.client.prepare(topic=self.topic, server=CONF.host)

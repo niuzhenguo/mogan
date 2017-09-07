@@ -110,6 +110,7 @@ class RPCAPITestCase(base.DbTestCase):
                           user_data=None,
                           injected_files=None,
                           key_pair=None,
+                          partitions=None,
                           request_spec=None,
                           filter_properties=None)
 
@@ -130,4 +131,5 @@ class RPCAPITestCase(base.DbTestCase):
         self._test_rpcapi('rebuild_server',
                           'cast',
                           version='1.0',
-                          server=self.fake_server_obj)
+                          server=self.fake_server_obj,
+                          preserve_ephemeral=True)

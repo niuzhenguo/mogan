@@ -550,6 +550,13 @@ nodes:
   in: body
   required: true
   type: object
+partitions:
+  description: |
+    The partitions info for root disk, this is only allowed when using partition images
+    with root_gb(required), ephemeral_gb, and swap_mb.
+  in: body
+  required: false
+  type: object
 personality:
   description: |
     The file path and contents, text only, to inject into the server at launch. The
@@ -580,6 +587,13 @@ power_state_target:
   in: body
   required: true
   type: string
+preserve_ephemeral:
+  description: |
+    Indicates whether the server is rebuilt with the preservation of the ephemeral
+    partition (``true``).
+  in: body
+  required: false
+  type: boolean
 project_id_body:
   description: |
     The UUID of the project in a multi-tenancy cloud.

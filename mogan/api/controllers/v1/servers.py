@@ -161,8 +161,9 @@ class ServerStatesController(ServerControllerBase):
 
     @policy.authorize_wsgi("mogan:server", "set_provision_state")
     @expose.expose(None, types.uuid, wtypes.text, types.uuid,
-                   status_code=http_client.ACCEPTED)
-    def provision(self, server_uuid, target, image_uuid=None):
+                   types.boolean, status_code=http_client.ACCEPTED)
+    def provision(self, server_uuid, target, image_uuid=None,
+                  preserve_ephemeral=None):
         """Asynchronous trigger the provisioning of the server.
 
         This will set the target provision state of the server, and
@@ -174,6 +175,8 @@ class ServerStatesController(ServerControllerBase):
 
         :param server_uuid: UUID of a server.
         :param target: The desired provision state of the server or verb.
+        :param image_uuid: UUID of the image rebuilt with.
+        :param preserve_ephemeral: whether preserve the ephemeral parition.
         """
 
         # Currently we only support rebuild target
@@ -184,7 +187,7 @@ class ServerStatesController(ServerControllerBase):
         db_server = self._resource or self._get_resource(server_uuid)
         if target == states.REBUILD:
             pecan.request.engine_api.rebuild(pecan.request.context, db_server,
-                                             image_uuid)
+                                             image_uuid, preserve_ephemeral)
 
         # Set the HTTP Location Header
         url_args = '/'.join([server_uuid, 'states'])
@@ -505,8 +508,9 @@ class ServerPatchType(types.JsonPatchType):
         defaults = types.JsonPatchType.internal_attrs()
         return defaults + ['/project_id', '/user_id', '/status',
                            '/power_state', '/availability_zone',
-                           '/flavor_uuid', '/image_uuid',
-                           '/nics', '/launched_at', '/affinity_zone']
+                           '/flavor_uuid', '/image_uuid', '/addresses',
+                           '/launched_at', '/affinity_zone', '/key_name',
+                           '/partitions', '/fault', '/node']
 
 
 class ServerCollection(base.APIBase):
@@ -717,6 +721,7 @@ class ServerController(ServerControllerBase):
         image_uuid = server.get('image_uuid')
         user_data = server.get('user_data')
         key_name = server.get('key_name')
+        partitions = server.get('partitions')
         personality = server.pop('personality', None)
 
         injected_files = []
@@ -741,6 +746,7 @@ class ServerController(ServerControllerBase):
             key_name=key_name,
             min_count=min_count,
             max_count=max_count,
+            partitions=partitions,
             scheduler_hints=scheduler_hints)
         # Set the HTTP Location Header for the first server.
         pecan.response.location = link.build_url('server', servers[0].uuid)
