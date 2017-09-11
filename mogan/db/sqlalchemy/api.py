@@ -127,8 +127,8 @@ class Connection(api.Connection):
             query = query.filter_by(flavor_uuid=filters['flavor_uuid'])
         if 'image_uuid' in filters:
             query = query.filter_by(image_uuid=filters['image_uuid'])
-        if 'node' in filters:
-            query = query.filter_by(node=filters['node'])
+        if 'node_uuid' in filters:
+            query = query.filter_by(node_uuid=filters['node_uuid'])
         return query
 
     @oslo_db_api.retry_on_deadlock
@@ -1042,14 +1042,13 @@ class Connection(api.Connection):
         group = query.first()
         if not group:
             raise exception.ServerGroupNotFound(group_uuid=group_uuid)
-        group_id = group.id
-        with _session_for_write():
-            query.delete()
         # Delete policies and members
         instance_models = [models.ServerGroupPolicy,
                            models.ServerGroupMember]
         for model in instance_models:
-            model_query(context, model).filter_by(group_id=group_id).delete()
+            model_query(context, model).filter_by(group_id=group.id).delete()
+        with _session_for_write():
+            query.delete()
 
     def server_group_get_all(self, context, project_id=None):
         """Get all groups."""

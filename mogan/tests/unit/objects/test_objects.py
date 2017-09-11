@@ -250,7 +250,7 @@ class _TestObject(object):
         self.assertEqual('updated', obj.bar)
 
     def test_base_attributes(self):
-        dt = datetime.datetime(1955, 11, 5, 0, 0, tzinfo=iso8601.iso8601.Utc())
+        dt = datetime.datetime(1955, 11, 5, 0, 0, tzinfo=iso8601.UTC)
         datatime = fields.DateTimeField()
         obj = MyObj(self.context)
         obj.created_at = dt
@@ -382,7 +382,7 @@ class _TestObject(object):
 # version bump. It is md5 hash of object fields and remotable methods.
 # The fingerprint values should only be changed if there is a version bump.
 expected_object_fingerprints = {
-    'Server': '1.0-9063f3b9d00d4635c4d1f53183da848b',
+    'Server': '1.0-2ede97617e84ef9eed6ac61e67b13167',
     'ServerFault': '1.0-74349ff701259e4834b4e9dc2dac1b12',
     'ServerFaultList': '1.0-43e8aad0258652921f929934e9e048fd',
     'Flavor': '1.0-9f7166aa387d89ec40cd699019d0c9a9',
