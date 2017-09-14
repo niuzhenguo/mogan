@@ -85,6 +85,7 @@ class Server(Base):
     flavor_uuid = Column(String(36), nullable=True)
     availability_zone = Column(String(255), nullable=True)
     image_uuid = Column(String(36), nullable=True)
+    node = Column(String(255), nullable=True)
     node_uuid = Column(String(36), nullable=True)
     launched_at = Column(DateTime, nullable=True)
     extra = Column(db_types.JsonEncodedDict)
@@ -110,6 +111,7 @@ class ServerNic(Base):
     network_id = Column(String(36), nullable=True)
     fixed_ips = Column(db_types.JsonEncodedList)
     floating_ip = Column(String(64), nullable=True)
+    preserve_on_delete = Column(Boolean)
     _server = orm.relationship(
         Server,
         backref=orm.backref('server_nics', uselist=False),

@@ -101,8 +101,9 @@ class OnFailureRescheduleTask(flow_utils.MoganTask):
                              filter_properties=filter_properties)
 
     def revert(self, context, result, flow_failures, server, **kwargs):
-        # Clean up associated node uuid
+        # Clean up associated node
         server.node_uuid = None
+        server.node = None
         server.save()
 
         # Check if we have a cause which can tell us not to reschedule and
@@ -134,10 +135,7 @@ class BuildNetworkTask(flow_utils.MoganTask):
         self.manager = manager
 
     def _build_networks(self, context, server, requested_networks):
-
-        # TODO(zhenguo): This seems not needed as our scheduler has already
-        # guaranteed this.
-        ports = self.manager.driver.get_ports_from_node(server.node_uuid)
+        ports = self.manager.driver.get_portgroups_and_ports(server.node_uuid)
         if len(requested_networks) > len(ports):
             raise exception.InterfacePlugException(_(
                 "Ironic node: %(id)s virtual to physical interface count"
@@ -154,6 +152,7 @@ class BuildNetworkTask(flow_utils.MoganTask):
                 if vif.get('net_id'):
                     port = self.manager.network_api.create_port(
                         context, vif['net_id'], server.uuid)
+                    preserve_on_delete = False
                 elif vif.get('port_id'):
                     port = self.manager.network_api.show_port(
                         context, vif.get('port_id'))
@@ -161,11 +160,13 @@ class BuildNetworkTask(flow_utils.MoganTask):
                     self.manager.network_api.bind_port(context,
                                                        port['id'],
                                                        server)
+                    preserve_on_delete = True
 
                 nic_dict = {'port_id': port['id'],
                             'network_id': port['network_id'],
                             'mac_address': port['mac_address'],
                             'fixed_ips': port['fixed_ips'],
+                            'preserve_on_delete': preserve_on_delete,
                             'server_uuid': server.uuid}
 
                 server_nic = objects.ServerNic(context, **nic_dict)

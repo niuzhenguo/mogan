@@ -60,12 +60,10 @@ class BaseEngineDriver(object):
         """
         raise NotImplementedError()
 
-    def get_ports_from_node(self, node_uuid, detail=True):
-        """Get a node's ports info.
+    def get_portgroups_and_ports(self, node_uuid):
+        """Get a node's portgroups and ports info.
 
         :param node_uuid: node id to get ports info.
-        :param detail: whether to get detailed info of all the ports,
-            default to False.
         """
         raise NotImplementedError()
 
@@ -139,11 +137,42 @@ class BaseEngineDriver(object):
         """
         raise NotImplementedError()
 
+    def get_node_name(node):
+        """Get the name of a node.
+
+        :param node: the uuid of the node.
+        """
+        raise NotImplementedError()
+
     def get_manageable_nodes(self):
         """Retrieve all manageable nodes information.
 
         :returns:A list of describing manageable nodes
         """
+        raise NotImplementedError()
+
+    def get_manageable_node(self, node_uuid):
+        """Get the manageable node information by uuid
+
+        :param node_uuid: The manageable node uuid.
+        :return: A dict of manageable node information.
+        """
+        raise NotImplementedError()
+
+    def manage(self, server, node_uuid):
+        """Manage an existing bare metal node.
+
+        :param server: The bare metal server object.
+        :param node_uuid: The manageable bare metal node uuid.
+        """
+        raise NotImplementedError()
+
+    def unmanage(self, server, node_uuid):
+        """Unmanage a bare metal node.
+
+         :param server: The bare metal server object.
+         :param node_uuid: The manageable bare metal node uuid.
+         """
         raise NotImplementedError()
 
 

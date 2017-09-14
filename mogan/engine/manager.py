@@ -289,9 +289,9 @@ class EngineManager(base_manager.BaseEngineManager):
                 server.save()
 
     def destroy_networks(self, context, server):
-        ports = server.nics.get_port_ids()
-        for port in ports:
-            self._detach_interface(context, server, port)
+        for nic in server.nics:
+            self._detach_interface(context, server, nic.port_id,
+                                   nic.preserve_on_delete)
 
     def _rollback_servers_quota(self, context, number):
         reserve_opts = {'servers': number}
@@ -308,59 +308,59 @@ class EngineManager(base_manager.BaseEngineManager):
                                     request_spec=None,
                                     filter_properties=None):
 
-            if filter_properties is None:
-                filter_properties = {}
+        if filter_properties is None:
+            filter_properties = {}
 
-            retry = filter_properties.pop('retry', {})
+        retry = filter_properties.pop('retry', {})
 
-            # update attempt count:
-            if retry:
-                retry['num_attempts'] += 1
-            else:
-                retry = {
-                    'num_attempts': 1,
-                    'nodes': []  # list of tried nodes
-                }
-            filter_properties['retry'] = retry
-            request_spec['num_servers'] = len(servers)
-            request_spec['server_ids'] = [s.uuid for s in servers]
+        # update attempt count:
+        if retry:
+            retry['num_attempts'] += 1
+        else:
+            retry = {
+                'num_attempts': 1,
+                'nodes': []  # list of tried nodes
+            }
+        filter_properties['retry'] = retry
+        request_spec['num_servers'] = len(servers)
+        request_spec['server_ids'] = [s.uuid for s in servers]
+        try:
+            nodes = self.scheduler_client.select_destinations(
+                context, request_spec, filter_properties)
+        except exception.NoValidNode as e:
+            # Here should reset the state of building servers to Error
+            # state. And rollback the quotas.
+            # TODO(litao) rollback the quotas
+            with excutils.save_and_reraise_exception():
+                for server in servers:
+                    fsm = utils.get_state_machine(
+                        start_state=server.status,
+                        target_state=states.ACTIVE)
+                    utils.process_event(fsm, server, event='error')
+                    utils.add_server_fault_from_exc(
+                        context, server, e, sys.exc_info())
 
-            try:
-                nodes = self.scheduler_client.select_destinations(
-                    context, request_spec, filter_properties)
-            except exception.NoValidNode as e:
-                # Here should reset the state of building servers to Error
-                # state. And rollback the quotas.
-                # TODO(litao) rollback the quotas
-                with excutils.save_and_reraise_exception():
-                    for server in servers:
-                        fsm = utils.get_state_machine(
-                            start_state=server.status,
-                            target_state=states.ACTIVE)
-                        utils.process_event(fsm, server, event='error')
-                        utils.add_server_fault_from_exc(
-                            context, server, e, sys.exc_info())
+        LOG.info("The selected nodes %(nodes)s for servers",
+                 {"nodes": nodes})
 
-            LOG.info("The selected nodes %(nodes)s for servers",
-                     {"nodes": nodes})
+        for (server, node) in six.moves.zip(servers, nodes):
+            server.node_uuid = node
+            server.node = self.driver.get_node_name(node)
+            server.save()
+            # Add a retry entry for the selected node
+            retry_nodes = retry['nodes']
+            retry_nodes.append(node)
 
-            for (server, node) in six.moves.zip(servers, nodes):
-                server.node_uuid = node
-                server.save()
-                # Add a retry entry for the selected node
-                retry_nodes = retry['nodes']
-                retry_nodes.append(node)
-
-            for server in servers:
-                utils.spawn_n(self._create_server,
-                              context, server,
-                              requested_networks,
-                              user_data,
-                              injected_files,
-                              key_pair,
-                              partitions,
-                              request_spec,
-                              filter_properties)
+        for server in servers:
+            utils.spawn_n(self._create_server,
+                          context, server,
+                          requested_networks,
+                          user_data,
+                          injected_files,
+                          key_pair,
+                          partitions,
+                          request_spec,
+                          filter_properties)
 
     @wrap_server_fault
     def _create_server(self, context, server, requested_networks,
@@ -582,24 +582,28 @@ class EngineManager(base_manager.BaseEngineManager):
                 vif_port = self.network_api.show_port(context, port_id)
             except Exception:
                 raise exception.PortNotFound(port_id=port_id)
-
-            self.network_api.check_port_availability(vif_port)
+            try:
+                self.network_api.check_port_availability(vif_port)
+                self.network_api.bind_port(context, port_id, server)
+            except Exception as e:
+                raise exception.InterfaceAttachFailed(message=six.text_type(e))
+            preserve_on_delete = True
 
         else:
             LOG.debug("Attaching network interface %(net_id) to server "
                       "%(server)s", {'net_id': net_id, 'server': server})
             vif_port = self.network_api.create_port(context, net_id,
                                                     server.uuid)
+            preserve_on_delete = False
 
         try:
-            vif = self.network_api.bind_port(context, vif_port['id'], server)
-            vif_port = vif['port']
             self.driver.plug_vif(server.node_uuid, vif_port['id'])
             nics_obj = objects.ServerNics(context)
             nic_dict = {'port_id': vif_port['id'],
                         'network_id': vif_port['network_id'],
                         'mac_address': vif_port['mac_address'],
                         'fixed_ips': vif_port['fixed_ips'],
+                        'preserve_on_delete': preserve_on_delete,
                         'server_uuid': server.uuid}
             nics_obj.objects.append(objects.ServerNic(
                 context, **nic_dict))
@@ -614,7 +618,7 @@ class EngineManager(base_manager.BaseEngineManager):
             raise exception.InterfaceAttachFailed(message=six.text_type(e))
         LOG.info('Attaching interface successfully')
 
-    def _detach_interface(self, context, server, port_id):
+    def _detach_interface(self, context, server, port_id, preserve=False):
         try:
             self.driver.unplug_vif(context, server, port_id)
         except exception.MoganException as e:
@@ -624,7 +628,11 @@ class EngineManager(base_manager.BaseEngineManager):
             raise exception.InterfaceDetachFailed(server_uuid=server.uuid)
         else:
             try:
-                self.network_api.delete_port(context, port_id, server.uuid)
+                if preserve:
+                    vif_port = self.network_api.show_port(context, port_id)
+                    self.network_api.unbind_port(context, vif_port)
+                else:
+                    self.network_api.delete_port(context, port_id, server.uuid)
             except Exception as e:
                 raise exception.InterfaceDetachFailed(server_uuid=server.uuid)
 
@@ -637,7 +645,12 @@ class EngineManager(base_manager.BaseEngineManager):
     def detach_interface(self, context, server, port_id):
         LOG.debug("Detaching interface %(port_id) from server %(server)s",
                   {'port_id': port_id, 'server': server.uuid})
-        self._detach_interface(context, server, port_id)
+        try:
+            db_nic = objects.ServerNic.get_by_port_id(context, port_id)
+            preserve = db_nic['preserve_on_delete']
+        except exception.PortNotFound:
+            preserve = False
+        self._detach_interface(context, server, port_id, preserve)
 
         LOG.info('Interface was successfully detached')
 
@@ -673,3 +686,92 @@ class EngineManager(base_manager.BaseEngineManager):
 
     def get_manageable_servers(self, context):
         return self.driver.get_manageable_nodes()
+
+    def _manage_server(self, context, server, node):
+        # Create the rp
+        resource_class = sched_utils.ensure_resource_class_name(
+            node['resource_class'])
+        inventory = self.driver.get_node_inventory(node)
+        inventory_data = {resource_class: inventory}
+        # TODO(liusheng) need to ensure the inventory being rollback if
+        # putting allocations failed.
+        self.scheduler_client.set_inventory_for_provider(
+            node['uuid'], node['name'] or node['uuid'], inventory_data,
+            resource_class)
+        # Allocate the resource
+        self.scheduler_client.reportclient.put_allocations(
+            node['uuid'], server.uuid, {resource_class: 1},
+            server.project_id, server.user_id)
+
+        LOG.info("Starting to manage bare metal node %(node_uuid)s for "
+                 "server %(uuid)s",
+                 {"node_uuid": node['uuid'], "uuid": server.uuid})
+
+        nics_obj = objects.ServerNics(context)
+        # Check networks
+        all_ports = node['ports'] + node['portgroups']
+        for vif in all_ports:
+            neutron_port_id = vif['neutron_port_id']
+            if neutron_port_id is not None:
+                port_dict = self.network_api.show_port(
+                    context, neutron_port_id)
+
+                nic_dict = {'port_id': port_dict['id'],
+                            'network_id': port_dict['network_id'],
+                            'mac_address': port_dict['mac_address'],
+                            'fixed_ips': port_dict['fixed_ips'],
+                            'preserve_on_delete': False,
+                            'server_uuid': server.uuid}
+
+                # Check if the neutron port's mac address matches the port
+                # address of bare metal nics.
+                if nic_dict['mac_address'] != vif['address']:
+                    msg = (
+                        _("The address of neutron port %(port_id)s is "
+                          "%(address)s, but the nic address of bare metal "
+                          "node %(node_uuid)s is %(nic_address)s.") %
+                        {"port_id": nic_dict['port_id'],
+                         "address": nic_dict['mac_address'],
+                         "node_uuid": node['uuid'],
+                         "nic_address": vif['address']})
+                    raise exception.NetworkError(msg)
+
+                self.network_api.bind_port(context, neutron_port_id, server)
+                server_nic = objects.ServerNic(context, **nic_dict)
+                nics_obj.objects.append(server_nic)
+
+        # Manage the bare metal node
+        self.driver.manage(server, node['uuid'])
+
+        image_uuid = node.get('image_source')
+        if not uuidutils.is_uuid_like(image_uuid):
+            image_uuid = None
+
+        # Set the server information
+        server.image_uuid = image_uuid
+        server.node_uuid = node['uuid']
+        server.node = node['name']
+        server.nics = nics_obj
+        server.power_state = node['power_state']
+        server.launched_at = timeutils.utcnow()
+        server.status = states.ACTIVE
+        if server.power_state == states.POWER_OFF:
+            server.status = states.STOPPED
+
+    def manage_server(self, context, server, node_uuid):
+        try:
+            node = self.driver.get_manageable_node(node_uuid)
+            self._manage_server(context, server, node)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                self._rollback_servers_quota(context, -1)
+        # Save the server information
+        try:
+            server.create()
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                self._rollback_servers_quota(context, -1)
+                self.driver.unmanage(server, node['uuid'])
+
+        LOG.info("Manage server %s successfully.", server.uuid)
+        return server

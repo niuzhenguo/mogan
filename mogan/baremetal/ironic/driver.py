@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import collections
+
 from ironicclient import exc as ironic_exc
 from ironicclient import exceptions as client_e
 from oslo_log import log as logging
@@ -227,13 +229,24 @@ class IronicDriver(base_driver.BaseEngineDriver):
 
         _log_ironic_polling(message, node, server)
 
-    def get_ports_from_node(self, node_uuid, detail=True):
-        """List the MAC addresses and the port types from a node."""
-        ports = self.ironicclient.call("node.list_ports",
-                                       node_uuid, detail=detail)
-        portgroups = self.ironicclient.call("portgroup.list", node=node_uuid,
-                                            detail=detail)
-        return ports + portgroups
+    def get_portgroups_and_ports(self, node_uuid):
+        """List ports and portgroups of a node."""
+        free_ports = []
+        ports_by_portgroup = collections.defaultdict(list)
+        ports = self.ironicclient.call("node.list_ports", node_uuid,
+                                       detail=True)
+        for p in ports:
+            if p.portgroup_uuid is None:
+                free_ports.append(p)
+            else:
+                ports_by_portgroup[p.portgroup_uuid].append(p)
+
+        portgroups = self.ironicclient.call("portgroup.list", node=node_uuid)
+        for pg in portgroups:
+            if ports_by_portgroup[pg.uuid]:
+                free_ports.append(pg)
+
+        return free_ports
 
     def plug_vif(self, node_uuid, port_id):
         self.ironicclient.call("node.vif_attach", node_uuid, port_id)
@@ -740,6 +753,19 @@ class IronicDriver(base_driver.BaseEngineDriver):
         return (not node.instance_uuid and node.provision_state ==
                 ironic_states.AVAILABLE)
 
+    def get_node_name(self, node):
+        """Get the name of a node.
+
+        :param node: the uuid of the node.
+        """
+        try:
+            node = self.ironicclient.call(
+                'node.get', node, fields=('name',))
+        except Exception:
+            return None
+
+        return node.name
+
     def get_manageable_nodes(self):
         nodes = self._get_manageable_nodes()
         manageable_nodes = []
@@ -754,3 +780,80 @@ class IronicDriver(base_driver.BaseEngineDriver):
                  'portgroups': node.get('portgroups'),
                  'image_source': node.get('image_source')})
         return manageable_nodes
+
+    def get_manageable_node(self, node_uuid):
+        try:
+            node = self.ironicclient.call('node.get', node_uuid)
+        except ironic_exc.NotFound:
+            raise exception.NodeNotFound(node=node_uuid)
+
+        if (node.instance_uuid is not None or
+            node.provision_state != ironic_states.ACTIVE or
+                node.resource_class is None):
+                LOG.error("The node's instance uuid is %(instance_uuid)s, "
+                          "node's provision state is %(provision_state)s, "
+                          "node's resource class is %(resource_class)s",
+                          {"instance_uuid": node.instance_uuid,
+                           "provision_state": node.provision_state,
+                           "resource_class": node.resource_class})
+                raise exception.NodeNotAllowedManaged(node_uuid=node_uuid)
+
+        # Retrieves ports
+        params = {
+            'limit': 0,
+            'fields': ('uuid', 'node_uuid', 'extra', 'address',
+                       'internal_info')
+        }
+
+        port_list = self.ironicclient.call("port.list", **params)
+        portgroup_list = self.ironicclient.call("portgroup.list", **params)
+
+        # Add ports to the associated node
+        node.ports = [self._port_or_group_resource(port)
+                      for port in port_list
+                      if node.uuid == port.node_uuid]
+        # Add portgroups to the associated node
+        node.portgroups = [self._port_or_group_resource(portgroup)
+                           for portgroup in portgroup_list
+                           if node.uuid == portgroup.node_uuid]
+        node.power_state = map_power_state(node.power_state)
+        manageable_node = self._node_resource(node)
+        manageable_node['uuid'] = node_uuid
+
+        return manageable_node
+
+    def manage(self, server, node_uuid):
+        """Manage an existing bare metal node.
+
+        :param server: The bare metal server object.
+        :param node_uuid: The manageable bare metal node uuid.
+        """
+        # Associate the node with a server
+        patch = [{'path': '/instance_uuid', 'op': 'add', 'value': server.uuid}]
+
+        try:
+            self.ironicclient.call('node.update', node_uuid, patch,
+                                   retry_on_conflict=False)
+        except ironic_exc.BadRequest:
+            msg = (_("Failed to update parameters on node %(node)s "
+                     "when provisioning the server %(server)s")
+                   % {'node': node_uuid, 'server': server.uuid})
+            LOG.error(msg)
+            raise exception.ServerDeployFailure(msg)
+
+    def unmanage(self, server, node_uuid):
+        """unmanage a bare metal node.
+
+         :param server: The bare metal server object.
+         :param node_uuid: The manageable bare metal node uuid.
+         """
+        patch = [{'path': '/instance_uuid', 'op': 'remove'}]
+
+        try:
+            self.ironicclient.call('node.update', node_uuid, patch)
+        except ironic_exc.BadRequest as e:
+            LOG.warning("Failed to remove deploy parameters from node "
+                        "%(node)s when unprovisioning the server "
+                        "%(server)s: %(reason)s",
+                        {'node': node_uuid, 'server': server.uuid,
+                         'reason': six.text_type(e)})

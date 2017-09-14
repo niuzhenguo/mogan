@@ -68,6 +68,10 @@ server_group_id = {
     'type': 'string', 'format': 'uuid'
 }
 
+node_uuid = {
+    'type': 'string', 'format': 'uuid'
+}
+
 metadata = {
     'type': 'object',
     'patternProperties': {
@@ -83,17 +87,6 @@ resources = {
     'type': 'object',
     'patternProperties': {
         '^[a-zA-Z0-9-_:.]{1,255}$': positive_integer
-    },
-    'additionalProperties': False
-}
-
-
-resource_traits = {
-    'type': 'object',
-    'patternProperties': {
-        '^[a-zA-Z0-9-_:.]{1,255}$': {
-            'type': 'string', 'maxLength': 255
-        }
     },
     'additionalProperties': False
 }

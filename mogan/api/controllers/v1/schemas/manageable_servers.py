@@ -1,4 +1,4 @@
-# Copyright 2017 Huawei Technologies Co.,LTD.
+# Copyright 2017 Fiberhome Integration Technologies Co.,LTD.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -17,16 +17,14 @@
 from mogan.api.validation import parameter_types
 
 
-create_flavor = {
+manage_server = {
     "type": "object",
     "properties": {
         'name': parameter_types.name,
-        'description': {'type': 'string', 'minLength': 1},
-        'resources': parameter_types.resources,
-        'resource_aggregates': parameter_types.metadata,
-        'is_public': parameter_types.boolean,
-        'disabled': parameter_types.boolean,
+        'description': parameter_types.description,
+        'node_uuid': parameter_types.node_uuid,
+        'metadata': parameter_types.metadata
     },
-    'required': ['name', 'description', 'resources'],
+    'required': ['name', 'node_uuid'],
     'additionalProperties': False,
 }
