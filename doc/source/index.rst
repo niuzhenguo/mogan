@@ -58,6 +58,7 @@ User Guide
   :maxdepth: 1
 
   user/states
+  user/availability-zones
   user/root-disk-partitions
 
 
@@ -67,6 +68,7 @@ Administrator Guide
 .. toctree::
   :maxdepth: 1
 
+  admin/flavors
   admin/gmr
 
 

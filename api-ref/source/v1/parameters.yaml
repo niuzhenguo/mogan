@@ -109,6 +109,13 @@ flavor_query:
   in: query
   required: false
   type: string
+group_all_tenants:
+  description: |
+    Specify the ``all_tenants=1`` query parameter to list server groups
+    for all projects. By default this is only allowed by admin users.
+  in: query
+  required: false
+  type: integer
 image_query:
   description: |
     Filters the server list by image's UUID.
@@ -420,7 +427,7 @@ links:
   type: array
 lock_state:
   description: |
-    The request to lock/unlock servers.
+    The lock state of a server.
   in: body
   required: true
   type: boolean
@@ -564,14 +571,6 @@ port_uuid:
     specify the port_id in a ``networks`` list.
   in: body
   required: false
-  type: string
-power_state:
-  description: |
-    The current power state of this Server. Usually, "power on" or
-    "power off", but may be "None" if Mogan is unable to determine the power
-    state (eg, due to hardware failure).
-  in: body
-  required: true
   type: string
 power_state_target:
   description: |

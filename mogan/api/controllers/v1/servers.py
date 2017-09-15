@@ -51,25 +51,6 @@ _ONLY_ADMIN_VISIBLE_SEVER_FIELDS = ('node', 'affinity_zone',)
 LOG = log.getLogger(__name__)
 
 
-class ServerStates(base.APIBase):
-    """API representation of the states of a server."""
-
-    power_state = wtypes.text
-    """Represent the current power state of the server"""
-
-    status = wtypes.text
-    """Represent the current status of the server"""
-
-    locked = types.boolean
-    """Represent the current lock state of the server"""
-
-    @classmethod
-    def sample(cls):
-        sample = cls(power_state=states.POWER_ON,
-                     status=states.ACTIVE, locked=False)
-        return sample
-
-
 class ServerControllerBase(rest.RestController):
     _resource = None
 
@@ -86,19 +67,6 @@ class ServerStatesController(ServerControllerBase):
         'lock': ['PUT'],
         'provision': ['PUT'],
     }
-
-    @policy.authorize_wsgi("mogan:server", "get_states")
-    @expose.expose(ServerStates, types.uuid)
-    def get(self, server_uuid):
-        """List the states of the server, just support power state at present.
-
-        :param server_uuid: the UUID of a server.
-        """
-        db_server = self._resource or self._get_resource(server_uuid)
-
-        return ServerStates(power_state=db_server.power_state,
-                            status=db_server.status,
-                            locked=db_server.locked)
 
     @policy.authorize_wsgi("mogan:server", "set_power_state")
     @expose.expose(None, types.uuid, wtypes.text,
@@ -459,6 +427,12 @@ class Server(base.APIBase):
     key_name = wtypes.text
     """The ssh key name of the server"""
 
+    partitions = types.jsontype
+    """The partitions of the server"""
+
+    locked = types.boolean
+    """Represent the current lock state of the server"""
+
     def __init__(self, **kwargs):
         super(Server, self).__init__(**kwargs)
         self.fields = []
@@ -510,7 +484,7 @@ class ServerPatchType(types.JsonPatchType):
                            '/power_state', '/availability_zone',
                            '/flavor_uuid', '/image_uuid', '/addresses',
                            '/launched_at', '/affinity_zone', '/key_name',
-                           '/partitions', '/fault', '/node']
+                           '/partitions', '/fault', '/node', '/locked']
 
 
 class ServerCollection(base.APIBase):

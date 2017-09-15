@@ -389,10 +389,14 @@ class EngineManager(base_manager.BaseEngineManager):
                 request_spec,
                 filter_properties,
             )
-        except Exception:
+        except Exception as e:
             with excutils.save_and_reraise_exception():
                 utils.process_event(fsm, server, event='error')
                 self._rollback_servers_quota(context, -1)
+                notifications.notify_about_server_action(
+                    context, server, self.host,
+                    action=fields.NotificationAction.CREATE,
+                    phase=fields.NotificationPhase.ERROR, exception=e)
                 msg = _("Create manager server flow failed.")
                 LOG.exception(msg)
 
@@ -411,19 +415,26 @@ class EngineManager(base_manager.BaseEngineManager):
                 server.power_state = states.NOSTATE
                 utils.process_event(fsm, server, event='error')
                 self._rollback_servers_quota(context, -1)
+                notifications.notify_about_server_action(
+                    context, server, self.host,
+                    action=fields.NotificationAction.CREATE,
+                    phase=fields.NotificationPhase.ERROR, exception=e)
                 LOG.error("Created server %(uuid)s failed."
                           "Exception: %(exception)s",
                           {"uuid": server.uuid,
                            "exception": e})
-        else:
-            # Advance the state model for the given event. Note that this
-            # doesn't alter the server in any way. This may raise
-            # InvalidState, if this event is not allowed in the current state.
-            server.power_state = self.driver.get_power_state(context,
-                                                             server.uuid)
-            server.launched_at = timeutils.utcnow()
-            utils.process_event(fsm, server, event='done')
-            LOG.info("Created server %s successfully.", server.uuid)
+        # Advance the state model for the given event. Note that this
+        # doesn't alter the server in any way. This may raise
+        # InvalidState, if this event is not allowed in the current state.
+        server.power_state = self.driver.get_power_state(context,
+                                                         server.uuid)
+        server.launched_at = timeutils.utcnow()
+        utils.process_event(fsm, server, event='done')
+        notifications.notify_about_server_action(
+            context, server, self.host,
+            action=fields.NotificationAction.CREATE,
+            phase=fields.NotificationPhase.END)
+        LOG.info("Created server %s successfully.", server.uuid)
 
     def _delete_server(self, context, server):
         """Delete a server
@@ -431,8 +442,6 @@ class EngineManager(base_manager.BaseEngineManager):
         :param context: mogan request context
         :param server: server object
         """
-        # TODO(zhenguo): Add delete notification
-
         try:
             self.destroy_networks(context, server)
         except Exception as e:
@@ -446,7 +455,10 @@ class EngineManager(base_manager.BaseEngineManager):
     def delete_server(self, context, server):
         """Delete a server."""
         LOG.debug("Deleting server: %s.", server.uuid)
-
+        notifications.notify_about_server_action(
+            context, server, self.host,
+            action=fields.NotificationAction.DELETE,
+            phase=fields.NotificationPhase.START)
         fsm = utils.get_state_machine(start_state=server.status,
                                       target_state=states.DELETED)
 
@@ -475,6 +487,10 @@ class EngineManager(base_manager.BaseEngineManager):
         server.power_state = states.NOSTATE
         utils.process_event(fsm, server, event='done')
         server.destroy()
+        notifications.notify_about_server_action(
+            context, server, self.host,
+            action=fields.NotificationAction.DELETE,
+            phase=fields.NotificationPhase.END)
         LOG.info("Deleted server successfully.")
 
     @wrap_server_fault
@@ -496,8 +512,8 @@ class EngineManager(base_manager.BaseEngineManager):
                                                              server.uuid)
         except Exception as e:
             with excutils.save_and_reraise_exception():
-                LOG.exception("Set server power state to %(state) failed, the "
-                              "reason: %(reason)s",
+                LOG.exception("Set server power state to %(state)s failed, "
+                              "the reason: %(reason)s",
                               {"state": state, "reason": six.text_type(e)})
                 server.power_state = self.driver.get_power_state(context,
                                                                  server.uuid)
@@ -576,7 +592,7 @@ class EngineManager(base_manager.BaseEngineManager):
     def attach_interface(self, context, server, net_id, port_id):
         # prepare port to be attached
         if port_id:
-            LOG.debug("Attaching port %(port_id) to server %(server)s",
+            LOG.debug("Attaching port %(port_id)s to server %(server)s",
                       {'port_id': port_id, 'server': server})
             try:
                 vif_port = self.network_api.show_port(context, port_id)
@@ -590,7 +606,7 @@ class EngineManager(base_manager.BaseEngineManager):
             preserve_on_delete = True
 
         else:
-            LOG.debug("Attaching network interface %(net_id) to server "
+            LOG.debug("Attaching network interface %(net_id)s to server "
                       "%(server)s", {'net_id': net_id, 'server': server})
             vif_port = self.network_api.create_port(context, net_id,
                                                     server.uuid)
@@ -643,7 +659,7 @@ class EngineManager(base_manager.BaseEngineManager):
 
     @wrap_server_fault
     def detach_interface(self, context, server, port_id):
-        LOG.debug("Detaching interface %(port_id) from server %(server)s",
+        LOG.debug("Detaching interface %(port_id)s from server %(server)s",
                   {'port_id': port_id, 'server': server.uuid})
         try:
             db_nic = objects.ServerNic.get_by_port_id(context, port_id)
