@@ -5,4 +5,4 @@
 .. toctree::
    :maxdepth: 1
 
-   unreleased
+   0.1.0
