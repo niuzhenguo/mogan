@@ -60,6 +60,7 @@ User Guide
   user/states
   user/availability-zones
   user/root-disk-partitions
+  user/server-groups
 
 
 Administrator Guide
@@ -69,6 +70,7 @@ Administrator Guide
   :maxdepth: 1
 
   admin/flavors
+  admin/aggregates
   admin/gmr
 
 
